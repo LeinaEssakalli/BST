@@ -1,0 +1,779 @@
+---
+title: "STAT115 Homework 1"
+author: "Leina Essakalli Houssaini"
+date: "January 28, 2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)# please knit with `echo=TRUE, eval=TRUE`
+```
+
+
+# Part 0: Odyssey Signup
+
+Please fill out the Odyssey survey on Canvas so we can create an account for you. 
+
+# Part I: Introduction to R
+
+## Problem 1: Installation
+
+**Please install the following R/Bioconductor packages**
+
+```{r install, eval = FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install()
+BiocManager::install("sva")
+```
+
+
+
+Please run this command to see if Bioconductor can work fine.
+
+```{r} 
+# please knit with this command echoed.
+BiocManager::valid() 
+```
+
+
+```{r libraries, message = FALSE,eval=TRUE }
+# these packages are needed for HW2
+# affy and affyPLM are needed to read the microarray data and run RMA
+library(sva) # for batch effect correction. Contains ComBat and sva.
+library(ggplot2) # for plotting
+library(dplyr) # for data manipulation
+library(reticulate) # needed to run python in Rstudio
+# these next two are not essential to this course
+library(mvtnorm) # need this to simulate data from multivariate normal
+library(HistData) # need this for data
+```
+
+When we grade, we should download their Rmd and knit it ourselves. They
+should have points removed if their document does not knit. On this HW,
+we will not take off points, but will warn them for next time.
+
+If they have hard-coded file names, we will warn them on this as well.
+
+## Problem 2: Getting help
+
+You can use the `mean()` function to compute the mean of a vector like
+so:
+
+```{r mean,eval=TRUE}
+x1 <- c(1:10, 50)
+mean(x1)
+```
+
+However, this does not work if the vector contains NAs:
+
+```{r mean-na,eval=TRUE}
+x1_na <- c(1:10, 50, NA)
+mean(x1_na, na.rm = TRUE)
+```
+
+**Please use R documentation to find the mean after excluding NA's (hint: `?mean`)**
+
+```{r problem2}
+#
+mean(x1_na, na.rm = TRUE)
+```
+
+
+# Part II: Data Manipulation
+
+## Problem 3: Basic Selection
+
+In this question, we will practice data manipulation using a dataset
+collected by Francis Galton in 1886 on the heights of parents and their
+children. This is a very famous dataset, and Galton used it to come up
+with regression and correlation.
+
+The data is available as `GaltonFamilies` in the `HistData` package.
+Here, we load the data and show the first few rows. To find out more
+information about the dataset, use `?GaltonFamilies`.
+
+
+
+```{r loadGalton , eval = TRUE}
+#install.packages('HistData')
+library(HistData)
+data(GaltonFamilies)
+head(GaltonFamilies)
+```
+
+a. **Please report the height of the 10th child in the dataset.**
+
+```{r problem3a ,eval = TRUE}
+#option 1 
+GaltonFamilies[10,8] #10th row ,8th col 
+#option 2 
+GaltonFamilies$childHeight[10] #select col and then second the 10th row 
+```
+
+b. **What is the breakdown of male and female children in the dataset?**
+
+```{r problem3b ,eval = FALSE}
+GaltonFamilies%>%group_by(gender)%>%summarise(count = n())
+```
+
+c. **How many observations are in Galton's dataset? Please answer this
+question without consulting the R help.**
+
+```{r problem3c ,eval = TRUE}
+nrow(GaltonFamilies) #1 observation per row 
+```
+
+d. **What is the mean height for the 1st child in each family?**
+
+```{r problem3d ,eval = TRUE}
+GaltonFamilies%>%filter(childNum==1)%>%summarise(mean_height_1st_child = mean(childHeight)) #first select only the observation where the childnum col equal to 1 and then take the mean 
+```
+
+e. **Create a table showing the mean height for male and female children.**
+```{r problem3e ,eval = FALSE}
+GaltonFamilies%>%group_by(gender)%>%summarise(mean_height= mean(childHeight))
+```
+
+f. **What was the average number of children each family had?**
+
+```{r problem3f, ,eval = TRUE}
+GaltonFamilies_nonduplicates<-GaltonFamilies[!duplicated(GaltonFamilies$family),] #keep only 1 element (the first one) per family
+mean(GaltonFamilies_nonduplicates$children) #the take the mean of the col children
+```
+
+g. **Convert the children's heights from inches to centimeters and store
+it in a column called `childHeight_cm` in the `GaltonFamilies` dataset.
+Show the first few rows of this dataset.**
+
+```{r problem3g, ,eval = TRUE}
+GaltonFamilies<-GaltonFamilies%>%mutate(childHeight_cm=childHeight*2.54)
+head(GaltonFamilies)
+```
+
+
+## Problem 4: Spurious Correlation
+
+```{r gen-data-spurious, cache = TRUE, eval=TRUE}
+# set seed for reproducibility
+set.seed(1234)
+N <- 25
+ngroups <- 100000
+sim_data <- data.frame(group = rep(1:ngroups, each = N),
+                       X = rnorm(N * ngroups),
+                       Y = rnorm(N * ngroups))
+head(sim_data) #visulazing 
+#nrow(sim_data)
+#sim_data[26,]
+```
+
+In the code above, we generate `r ngroups` groups of `r N` observations
+each. In each group, we have X and Y, where X and Y are independent
+normally distributed data and have 0 correlation.
+
+a. **Find the correlation between X and Y for each group, and display
+the highest correlations.**
+
+Hint: since the data is quite large and your code might take a few
+moments to run, you can test your code on a subset of the data first
+(e.g. you can take the first 100 groups like so):
+
+```{r subset, ,eval = TRUE}
+sim_data_sub <- sim_data %>% filter(group <= 100) 
+corr_data_sub<-sim_data_sub %>% group_by(group) %>% summarise (correlation=cor(X,Y)) 
+head(corr_data_sub)#displays all 
+top_n(corr_data_sub, 10, correlation) #select 10 highest correlation (in ascending order )
+
+```
+
+In general, this is good practice whenever you have a large dataset:
+If you are writing new code and it takes a while to run on the whole
+dataset, get it to work on a subset first. By running on a subset, you
+can iterate faster.
+
+However, please do run your final code on the whole dataset.
+
+```{r cor, cache = TRUE, ,eval = TRUE}
+corr_data<-sim_data %>% group_by(group) %>% summarise (correlation=cor(X,Y)) 
+head(corr_data)#displays all 
+top_n(corr_data, 10, correlation) #select 10 highest correlation (in ascending order- highest is 0.8014245)
+```
+
+b. **The highest correlation is around 0.8. Can you explain why we see
+such a high correlation when X and Y are supposed to be independent and
+thus uncorrelated?**
+```{txt}
+We test the correlation between 2 variable on 100000 groups. 
+X and Y are normaly distributed variables and by pure chance on these 100000 groups there will be some that will be highly correlated(what we will qualify as False positive if we are actually trying to proove that there is a correlation between 2 variables in a paper).
+```
+
+
+
+# Part III: Plotting
+
+## Problem 5
+
+**Show a plot of the data for the group that had the highest correlation
+you found in Problem 4.**
+
+```{r problem5 ,eval = TRUE}
+# 99655 is the group with the highest correlation 
+group_99655<-sim_data %>% filter(group==99655)
+
+ggplot(data = group_99655) +
+geom_point(mapping = aes(x = X, y = Y))+
+ggtitle("Data of the group with highest correlation ") +
+xlab("X variable") +
+ylab("Y variable")
+```
+
+Grading: 1pt.
+
+## Problem 6
+
+We generate some sample data below. The data is numeric, and has 3
+columns: X, Y, Z.
+
+```{r gen-data-corr ,eval = TRUE}
+N <- 100
+Sigma <- matrix(c(1, 0.75, 0.75, 1), nrow = 2, ncol = 2) * 1.5
+means <- list(c(11, 3), c(9, 5), c(7, 7), c(5, 9), c(3, 11))
+dat <- lapply(means, function(mu)
+  rmvnorm(N, mu, Sigma))
+dat <- as.data.frame(Reduce(rbind, dat)) %>%
+  mutate(Z = as.character(rep(seq_along(means), each = N)))
+names(dat) <- c("X", "Y", "Z")
+```
+
+```{r}
+head(dat)
+```
+
+a. **Compute the overall correlation between X and Y.**
+
+```{r problem6a, eval = TRUE}
+cor(dat$X,dat$Y)
+```
+
+b. **Make a plot showing the relationship between X and Y. Comment on
+the correlation that you see.**
+
+```{r problem6b ,eval = TRUE}
+ggplot(data = dat) +
+geom_point(mapping = aes(x = X, y = Y))+
+ggtitle("X and Y points") +
+xlab("X variable") +
+ylab("Y variable")
+```
+
+This plot shows that x and Y are not independant. However , it looks like there are 5 different clusters and in each group it looks like x ans Y are positively correlated 
+
+c. **Compute the correlations between X and Y for each level of Z.**
+
+```{r problem6c ,eval = TRUE}
+ dat%>% group_by(Z) %>% summarise (correlation=cor(X,Y)) 
+```
+
+d. **Make a plot showing the relationship between X and Y, but this
+time, color the points using the value of Z. Comment on the result,
+especially any differences between this plot and the previous plot.**
+
+```{r problem6d ,eval = TRUE}
+ggplot(data = dat) +
+geom_point(mapping = aes(x = X, y = Y,color = Z))+
+ggtitle("X and Y data point colored by Z class ") +
+xlab("X variable") +
+ylab("Y variable")
+
+```
+This plot is showing the the Clusters I mentioned above correspond to different Z group. 
+
+
+# Part IV: Bash practices
+
+## Problem 7: Bash practices on Odyessy
+
+Please answer the following question using bash commands and include those in 
+your answer. Data are available at `/n/stat115/2020/HW1/public_MC3.maf`
+```{txt}
+To access the data : ls /n/stat115/2020/HW1/public_MC3.maf
+```
+
+Mutation Annotation Format ([MAF](https://docs.gdc.cancer.gov/Data/File_Formats/MAF_Format/)) is a tab-delimited text file with aggregated mutation information. `public_MC3.maf`
+is a curated list of [somatic mutation](https://www.britannica.com/science/somatic-mutation) 
+occured in many patients. Since a complete MAF file contains far mroe 
+information than we need, in this problem we will focus on part of it.
+
+```
+Chromosome	Start_Position	Hugo_Symbol	Variant_Classification
+10	123810032	TACC2	Missense_Mutation
+10	133967449	JAKMIP3	Silent
+11	124489539	PANX3	Missense_Mutation
+11	47380512	SPI1	Missense_Mutation
+11	89868837	NAALAD2	Missense_Mutation
+11	92570936	FAT3	Silent
+12	107371855	MTERFD3	Missense_Mutation
+12	108012011	BTBD11	Missense_Mutation
+12	117768962	NOS1	5'Flank
+```
+
+In  `/n/stats115/2020/HW1/MC3/public_MC3.maf`, `Chromosome` and `Start_Position` 
+together specifies the genomics location where a location has happened. 
+`Hogo_symbol` is the overlapping gene of that location, and 
+`Variant_Classification` specifies how it influences downstream biological 
+processes, e.g. transcription and translation. We are interested to find out
+recurrent mutations with biological significance.
+
+Hint: In this exercise you might need to use `cut` and `sort` command. Please 
+try `man cut` and `man sort` to understand how it works. You might also 
+benefit if you use pipes `|`.
+
+a. How many lines are there in this file? How many times "KRAS" gene 
+has appeared?
+
+```{r engine="bash", eval=FALSE}
+wc -l ls /n/stat115/2020/HW1/public_MC3.maf
+#3600964 lines 
+grep -o -i KRAS /n/stat115/2020/HW1/public_MC3.maf | wc -l
+#921 times "KRAS" gene has appeared
+
+```
+
+b. How many unique `Variant_Classification` are there in the MAF? Please 
+count occurence of each type and sort them. Which one is the most frequent? 
+
+```{r engine="bash", eval=FALSE}
+cut -f 4 /n/stat115/2020/HW1/public_MC3.maf | sort| uniq -c |sort -nr #cut -f 4 to work only with the 4th col 
+# most freauent : 1921979 Missense_Mutation
+```
+
+```{txt}
+Output 
+1921979 Missense_Mutation
+ 782687 Silent
+ 282636 3'UTR
+ 157232 Nonsense_Mutation
+ 108104 Intron
+  87013 Frame_Shift_Del
+  81323 5'UTR
+  50617 Splice_Site
+  49540 RNA
+  27128 Frame_Shift_Ins
+  21060 3'Flank
+  15726 5'Flank
+  10254 In_Frame_Del
+   2723 Translation_Start_Site
+   2042 Nonstop_Mutation
+    899 In_Frame_Ins
+      1 Variant_Classification
+
+```
+
+c. What are the top FIVE most frequent genes? Please provide 
+the bash command and equivalent Python command. If you are a PI 
+looking for a gene to investigate (you need to find a gene with potentially 
+better biological significance), which gene out of the top 5 would you 
+choose? Why?
+
+```{r engine="bash", eval=FALSE}
+cut -f 3 /n/stat115/2020/HW1/public_MC3.maf | sort| uniq -c |sort -nr | head -5
+#gene TP53 should be the one to investigate - I checked the tumorPortal webside and it is mentioning that its a tumor supressor protein.
+'. This protein acts as a tumor suppressor, which means that it regulates cell division by keeping cells from growing and dividing (proliferating) too fast or in an uncontrolled way.'
+
+#  15171 TTN
+#  6875 MUC16
+#  4601 TP53
+#  3198 CSMD3
+#  3102 SYNE1
+
+```
+
+Equivalent python command:
+
+```{r engine="python", eval=FALSE}
+# your python command
+vi frequent_genes.py
+from collections import Counter
+with open('/n/stat115/2020/HW1/public_MC3.maf') as file:
+    genes_names = [line.rstrip().split('\t')[2] for line in file] #selecting the 3rd element of each line(python index starts from 0 ) in the document and store it into gene_names array 
+cc=Counter(genes_names)
+print(cc.most_common(5))
+
+
+#then 
+python frequent_genes.py
+#output : [('TTN', 15171), ('MUC16', 6875), ('TP53', 4601), ('CSMD3', 3198), ('SYNE1', 3102)]
+```
+
+Your text answer:
+top 5 : TTN(15171)-MUC16( 6875)-TP53(4601)-CSMD3(3198)-SYNE1(3102) 
+
+d. Write a bash program that determines whether a user-input year ([YYYY]) is 
+a leap year or not (Definition: multiples of four with the exception of 
+centennial years not divisible by 400). The user-input can be either positional
+or interactive.
+
+```{r engine="bash", eval=FALSE}
+# your bash command
+vi lead_test.sh 
+read -p "Enter a year " year  
+(( !(year % 4) && ( year % 100 || !(year % 400) ) )) &&
+      echo "the year you entered leap year" || echo "the year you enterednot a leap"
+
+#bash leap_test.sh
+```
+
+
+# Part V. High throughput sequencing read mapping
+
+We will give you a simple example to test high throughput sequencing
+alignment for RNA-seq data. Normally for paired-end sequencing data,
+each sample will have two separate FASTQ files, with line-by-line
+correspondence to the two reads from the same fragment. Read mapping
+could take a long time, so we have created just two FASTQ files of one
+RNA-seq sample with only 1M fragments (three 2 X 1M reads) for you to run STAR
+instead of the full data. The files are located at
+`/n/stat115/2020/HW1/loop/`. 
+
+```
+loop
+├── A_l.fastq - read 1
+├── A_r.fastq - read 2 
+├── B_l.fastq
+├── B_r.fastq
+├── C_l.fastq
+└── C_r.fastq
+```
+
+Please include the commands that you used to run BWA and STAR in your
+answers.
+
+
+## Problem 8: BWA
+
+a. Use BWA (Li & Durbin, Bioinformatics 2009) to map the reads to the
+Hg38 version of the reference genome, available on Odyssey at
+`/n/stat115/2020/HW1/hg38.fasta`. 
+
+In `/n/stat115/2020/HW1/BWA/loop`, you are provided with three `.fastq` files/
+Write a for loop in bash to align the paired-end reads to the reference using 
+BWA on a compute node. Use the PE alignment mode and generate the output in 
+SAM format. Use SAMTools on the output to find out how many fragments are 
+mappable and uniquely mappable. How many rows are in each output SAM files?
+
+```{r engine="bash", eval=FALSE}
+vi BWA_test2.sh
+#!/bin/bash
+#SBATCH -n 1
+#SBATCH -N 1
+#SBATCH -t 60
+#SBATCH -p serial_requeue
+#SBATCH --mem=64G
+#SBATCH -o output_%j.out
+#SBATCH -e error_%j.out
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=leina_essakallihoussaini@hms.harvard.edu
+
+module load bwa/0.7.15-fasrc02
+module load samtools/1.5-fasrc02
+
+for ID in A B C
+do
+  left=/n/stat115/2020/HW1/loop/${ID}_l.fastq
+  right=/n/stat115/2020/HW1/loop/${ID}_r.fastq
+  ref=/n/stat115/2020/HW1/bwa_hg38_index/hg38.fasta
+# align each end separately
+  bwa aln $ref $left > ${ID}l.sai
+  bwa aln $ref $right > ${ID}r.sai
+
+  # stick everything in a SAM file
+  bwa sampe $ref ${ID}l.sai ${ID}r.sai $left $right > ${ID}-pe.sam
+
+  # count number of aligned reads, etc.
+  samtools flagstat ${ID}-pe.sam > ${ID}_number_of_aligned_reads.txt
+
+  # count number of uniquely mapped reads
+  samtools view -h ${ID}aln-pe.sam | grep -v -e 'XA:Z:'  -e 'SA:Z:'| samtools view -F 0x900 -f 0x2 -q 5| wc -l> ${ID}_number_of_uniqueley_aligned_reads.txt
+  
+
+
+done
+
+
+
+#then submission : 
+sbatch BWA_test2.sh
+
+
+#output A
+[stat115u20039@holylogin02 HW1]$ cat A_number_of_aligned_reads.txt 
+2000000 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+1900632 + 0 mapped (95.03% : N/A)
+2000000 + 0 paired in sequencing
+1000000 + 0 read1
+1000000 + 0 read2
+1706084 + 0 properly paired (85.30% : N/A)
+1845403 + 0 with itself and mate mapped
+55229 + 0 singletons (2.76% : N/A)
+44212 + 0 with mate mapped to a different chr
+28229 + 0 with mate mapped to a different chr (mapQ>=5)
+#A_number_of_uniqueley_aligned_reads:1028780
+
+
+#ouput B 
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+1900322 + 0 mapped (95.02% : N/A)
+2000000 + 0 paired in sequencing
+1000000 + 0 read1
+1000000 + 0 read2
+1705752 + 0 properly paired (85.29% : N/A)
+1845064 + 0 with itself and mate mapped
+55258 + 0 singletons (2.76% : N/A)
+44041 + 0 with mate mapped to a different chr
+28090 + 0 with mate mapped to a different chr (mapQ>=5)
+cat B_number_of_uniqueley_aligned_reads.txt
+#B_number_of_uniqueley_aligned_reads:1028085
+
+
+#ouput C
+2000000 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+1900666 + 0 mapped (95.03% : N/A)
+2000000 + 0 paired in sequencing
+1000000 + 0 read1
+1000000 + 0 read2
+1705385 + 0 properly paired (85.27% : N/A)
+1845284 + 0 with itself and mate mapped
+55382 + 0 singletons (2.77% : N/A)
+44666 + 0 with mate mapped to a different chr
+28488 + 0 with mate mapped to a different chr (mapQ>=5)
+#C_number_of_uniqueley_aligned_reads:1028016
+```
+
+
+
+b. Use slurm to submit the same BWA alignment jobs onto cluster for `A_r.fastq` 
+and `A_l.fastq`. Please copy the content of your `sbatch` file here.
+
+
+```{r engine="bash", eval=FALSE}
+vi BWA_A.sh
+#!/bin/bash
+#SBATCH -n 1
+#SBATCH -N 1
+#SBATCH -t 60
+#SBATCH -p serial_requeue
+#SBATCH --mem=64G
+#SBATCH -o output_%j.out
+#SBATCH -e error_%j.out
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=leina_essakallihoussaini@hms.harvard.edu
+
+module load bwa/0.7.15-fasrc02
+module load samtools/1.5-fasrc02
+
+
+  left=/n/stat115/2020/HW1/loop/A_l.fastq
+  right=/n/stat115/2020/HW1/loop/A_r.fastq
+  ref=/n/stat115/2020/HW1/bwa_hg38_index/hg38.fasta
+# align each end separately
+  bwa aln $ref $left > A2_l.sai
+  bwa aln $ref $right > A2_r.sai
+
+  # stick everything in a SAM file
+  bwa sampe $ref A2_l.sai $A2_r.sai $left $right > A2_pe.sam
+
+  # count number of aligned reads, etc.
+  samtools flagstat A2_pe.sam > A2_number_of_aligned_reads.txt
+
+  # count number of uniquely mapped reads
+  samtools view -h A2_aln-pe.sam | grep -v -e 'XA:Z:'  -e 'SA:Z:'| samtools view -F 0x900 -f 0x2 -q 5| wc -l> A2_number_of_uniqueley_aligned_reads.txt
+  
+
+
+
+#then submission : 
+sbatch BWA_test2.sh
+
+
+#output A
+[stat115u20039@holylogin02 HW1]$ cat A_number_of_aligned_reads.txt 
+2000000 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+1900632 + 0 mapped (95.03% : N/A)
+2000000 + 0 paired in sequencing
+1000000 + 0 read1
+1000000 + 0 read2
+1706084 + 0 properly paired (85.30% : N/A)
+1845403 + 0 with itself and mate mapped
+55229 + 0 singletons (2.76% : N/A)
+44212 + 0 with mate mapped to a different chr
+28229 + 0 with mate mapped to a different chr (mapQ>=5)
+#A_number_of_uniqueley_aligned_reads:1028780
+
+
+#ouput B 
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+1900322 + 0 mapped (95.02% : N/A)
+2000000 + 0 paired in sequencing
+1000000 + 0 read1
+1000000 + 0 read2
+1705752 + 0 properly paired (85.29% : N/A)
+1845064 + 0 with itself and mate mapped
+55258 + 0 singletons (2.76% : N/A)
+44041 + 0 with mate mapped to a different chr
+28090 + 0 with mate mapped to a different chr (mapQ>=5)
+cat B_number_of_uniqueley_aligned_reads.txt
+#B_number_of_uniqueley_aligned_reads:1028085
+
+
+#ouput C
+2000000 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+1900666 + 0 mapped (95.03% : N/A)
+2000000 + 0 paired in sequencing
+1000000 + 0 read1
+1000000 + 0 read2
+1705385 + 0 properly paired (85.27% : N/A)
+1845284 + 0 with itself and mate mapped
+55382 + 0 singletons (2.77% : N/A)
+44666 + 0 with mate mapped to a different chr
+28488 + 0 with mate mapped to a different chr (mapQ>=5)
+#C_number_of_uniqueley_aligned_reads:1028016
+```
+
+
+
+## Problem 9: STAR alignment
+
+a. Use STAR (Dobin et al, Bioinformatics 2012) to map the reads to the
+reference genome, available on Odyssey at
+`/n/stat115/2020/HW1/STARIndex`. Use the paired-end alignment mode and
+generate the output in SAM format for `A_r.fastq` 
+and `A_l.fastq` in `/n/stat115/2020/HW1/loop`. STAR should have a report.  
+How many fragments are mappable and how many are uniquely mappable?
+
+```{r engine="bash", eval=FALSE}
+
+vi star.sh
+
+#!/bin/bash
+#SBATCH -n 1
+#SBATCH -N 1
+#SBATCH -t 20
+#SBATCH -p serial_requeue
+#SBATCH --mem=64G
+#SBATCH -o output_%j.out
+#SBATCH -e error
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=leina_essakallihoussaini@hms.harvard.edu
+
+source new_modules.sh
+module load STAR/2.6.0c-fasrc01
+
+STAR --genomeDir /n/stat115/2020/HW1/STARIndex --runThreadN 100 --readFilesIn /n/stat115/2020/HW1/loop/A_r.fastq /n/stat115/2020/HW1/loop/A_l.fastq --outFileNamePrefix STARpaired
+
+
+#then i submited the job and used
+cat STARpairedLog.final.out # to view output 
+  Started job on |	Feb 07 18:59:41
+                             Started mapping on |	Feb 07 19:03:31
+                                    Finished on |	Feb 07 19:04:43
+       Mapping speed, Million of reads per hour |	50.00
+
+                          Number of input reads |	1000000
+                      Average input read length |	96
+                                    UNIQUE READS:
+                   Uniquely mapped reads number |	645281
+                        Uniquely mapped reads % |	64.53%
+                          Average mapped length |	95.64
+                       Number of splices: Total |	92909
+            Number of splices: Annotated (sjdb) |	91942
+                       Number of splices: GT/AG |	91941
+                       Number of splices: GC/AG |	627
+                       Number of splices: AT/AC |	87
+               Number of splices: Non-canonical |	254
+                      Mismatch rate per base, % |	0.15%
+                         Deletion rate per base |	0.01%
+                        Deletion average length |	1.46
+                        Insertion rate per base |	0.01%
+                       Insertion average length |	1.29
+                             MULTI-MAPPING READS:
+        Number of reads mapped to multiple loci |	296011
+             % of reads mapped to multiple loci |	29.60%
+        Number of reads mapped to too many loci |	2425
+             % of reads mapped to too many loci |	0.24%
+                                  UNMAPPED READS:
+       % of reads unmapped: too many mismatches |	0.00%
+                 % of reads unmapped: too short |	5.49%
+                     % of reads unmapped: other |	0.14%
+                                  CHIMERIC READS:
+                       Number of chimeric reads |	0
+                            % of chimeric reads |	0.00%
+
+```
+How many fragments are mappable and how many are uniquely mappable?
+```{txt}
+Mappable fragements to multiple loci:296011
+Uniquely mappable fragements:645281 
+```
+
+b. If you are getting a different number of mappable fragments between
+BWA and STAR on the same data, why?
+
+ STAR is Gap-aware aligner while BWA is not. 
+ This is causing STAR to have a number of uniquely mapped reads. Most of the time, STAR is used for mRNA. 
+
+
+# Part VII: Dynamic programming with Python
+
+## Problem 10 Dyanic Programming
+
+Given a list of finite integer numbers: e.g. -2, 1, 7, -4, 5, 2, -3, -6, 4, 3, 
+-8, -1, 6, -7, -9, -5.
+Write a python script to maximize the Z where Z is the sum of the
+numbers from location X to location Y on this list. Be aware, your
+algorithm should look at each number ONLY ONCE from left to right.
+
+Hint: You can use dynamic programming to solve this problem with <20
+lines of codes.
+
+```{r engine="python", eval=FALSE}
+vi dynamic_programming.py
+array_of_interest = [-2,1,7,-4, 5, 2, -3, -6, 4, 3, -8, -1, 6, -7, -9, -5]
+def max_subarray (A):
+    optimal_array=[None] * len(A) #initalizating the optional list to be same length as list of interest
+    optimal_array[0]=Z=A[0] #intialisating the first element of the array and the initial sum 
+    X=0  #initialising 
+    for i in range (1,len(A)): #looping from 2nd element to the end of array 
+        optimal_array[i]=max(A[i]+optimal_array[i-1],A[i]) #comparing sum of element i with previous optimal element and the element current element i  
+        Z=max(Z,optimal_array[i]) #update Z in case the optimal element I is higher than current max Z 
+
+        if A[i]>optimal_array[i-1]+A[i]:  #if element i is higher than the sum of element i and sum of i and previous optimal element 
+            Y=optimal_array.index(Z)+1 #add 1 to Y 
+            if optimal_array[i]==Z:
+                X=Y #update X 
+    return X,Y,Z
+print(max_subarray(array_of_interest)) #run the function and print the output 
+
+#then in terminal 
+python dynamic_programming.py
+#(2, 6, 11) where X=2, Y=6, Z=11
+```
+
+

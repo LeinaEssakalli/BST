@@ -1,0 +1,46 @@
+---
+title: "Homework2_knit"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+```
+
+
+```{r packages, include=TRUE, echo=TRUE, eval = TRUE}
+library(tidyverse)
+library(stringr)
+library(pheatmap)
+library(ggplot2)
+library(ggrepel)
+library(factoextra)
+library(sva)
+library(fgsea)
+#install.packages("msigdbr")
+library(msigdbr)
+library(org.Hs.eg.db)
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+ #   install.packages("BiocManager")
+
+#BiocManager::install("fgsea")
+
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+ #   install.packages("BiocManager")
+
+#BiocManager::install("org.Hs.eg.db")
+
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+
+#BiocManager::install("apeglm")
+
+
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+
+#BiocManager::install("DESeq2")
+
+library(DESeq2)
+library(apeglm)
+```

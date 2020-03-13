@@ -1,0 +1,577 @@
+---
+title: "Homework 3"
+author: "Leina Essakalli"
+date: "February 23, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, message = FALSE)
+```
+
+Spring 2020 STAT115/215 BIO/BST282
+Due: 3/8/2020 midnight
+
+# HOMEWORK 3: Classification and scRNA-seq
+
+## Part I: Sample classification
+
+We provide you z-score normalized expression data of 50 breast tumor samples, 50 normal breast samples (your training and cross-validation data), and 20 samples without diagnosis (your testing data). We want to use the 100 samples with known diagnosis to train machine learning models in order to predict the 20 unknown samples. 
+
+You will need the following libraries in R: `ggplot2` and `ggfortify` for plotting, `MASS` and `caret` for machine learning, and `pROC` is for evaluating testing performance. The [YouTube video on caret](https://youtu.be/z8PRU46I3NY) and the [package documentation](http://topepo.github.io/caret/index.html) might be helpful.
+
+```{r prepare}
+library(ggplot2)
+library(ggfortify)
+library(pROC)
+library(caret)
+library(e1071) # KNN
+library(kernlab) #SVM
+library(tidyverse)
+library("FactoMineR")
+library("factoextra")
+library(LogicReg)
+library(elasticnet)
+library(glmnet)
+library(randomForest)
+library(dplyr)
+library(Seurat)
+library(multtest)
+library(clustree)
+```
+
+```{r,eval=TRUE}
+#### read in data for question 1
+dataset <- read.table(file = "q1_data/BRCA_zscore_data.txt", sep = "\t", header = TRUE, row.names = 1)
+phenotype <- read.table(file = "q1_data/BRCA_phenotype.txt",sep = "\t", header = TRUE, row.names = 1)
+phenotype <- as.character(phenotype[rownames(dataset),'phenotype'])
+head(phenotype)
+#data_set_t<-as.data.frame(t(as.matrix(dataset)))
+dim(dataset)# each row is 1 sample and the phenotypes are either normal or tumor each col is a gene expression level 
+dataset_p<-dataset%>%mutate('phenotype'=phenotype)%>%select(phenotype,everything()) #add col of phenotype and the bring it to the front (easier)
+#head(dataset_p)
+```
+
+
+
+
+
+### 1. Run PCA for dimension reduction on the 100 samples with known labels, and draw these 100 samples in a 2D plot. Do cancer and normal separate from the first two PCs? Would this be sufficient to classify the unknown samples?
+
+```{r,eval=TRUE}
+dataset_p<-dataset%>%mutate('phenotype'=phenotype)%>%select(phenotype,everything()) #add col of phenotype and the bring it to the front (easier)
+#head(dataset_p)
+```
+
+
+```{r,eval=TRUE}
+data.pca<-prcomp(dataset,scale = TRUE, center = TRUE)
+#data.pca
+autoplot(data.pca, data = dataset_p, colour = 'phenotype',title = "PCA analysis for 100 samples")
+```
+
+```{txt}
+From the two first PCs the phenotypes seems to cluster but they are not clearly separted- It would therefore not be sufficient to classify  the unknow samples. The reason why its because PCA1 captures about 54 % of the variance in our data and PC2 captures about 8% - so only about 62 % of the variance can be explained by these 2 PC. 
+```
+
+
+### 2. Draw a plot showing the cumulative % variance captured from the top 100 PCs. How many PCs are needed to capture 90% of the variance? 
+
+
+```{r,eval=TRUE}
+eigs <- data.pca$sdev^2
+Cumulative = cumsum(eigs)/sum(eigs)
+plot(Cumulative,xlab="PCA number",ylab='Cumulative variance',main='Cumulative variance cpatured by the top 100 PCA',ylim=c(0,1))
+```
+
+```{r,eval=TRUE}
+length(Cumulative)
+Cumulative[20]
+pca_90<- min(which(Cumulative>=0.9)) #which(Cumulative>=0.9) gives all the indexes that satifsy this conditon - we only need the first element - it is the number of PCA needed to caputre 90% of the variance. 
+pca_90
+```
+```{txt}
+25 PCs are needed to capture 90% of the variance
+```
+
+### 3. Apply machine learning methods (KNN, logistic regression, Ridge regression, LASSO, ElasticNet, random forest, and support vector machines) on the top 25 PCs of the training data and 5-fold cross validation to classify the samples. `caret` and `MASS` already implemented all of the machine learning methods, including cross-validation. In order to get consistent results from different runs, use `set.seed(115)` right before each `train` command. 
+
+```{r,eval=TRUE}
+#data.pca
+training_data=data.frame(data.pca$x[,1:25])
+training_class<-phenotype
+#cross validation (cv)/number=5 5 cross 
+controls <- trainControl(method="cv", number=5, savePredictions = TRUE, classProbs =  TRUE)
+```
+
+```{txt}
+ressource to identify method arguement 
+https://rdrr.io/cran/caret/man/models.html
+```
+ 
+
+```{r,eval=TRUE}
+#KNN
+set.seed(115)
+fit.knn <- train(training_data,training_class, method="knn",trControl=controls,tuneLength = 10)
+#fit.knn
+#logistic regression, 
+set.seed(115)
+fit.lr <- train(training_data,training_class, method="glm",family='binomial',trControl=controls,tuneLength = 10)
+#fit.lr
+#Ridge regression, 
+set.seed(115)
+fit.ridge <- train(training_data,training_class, method = 'glmnet',tuneGrid = expand.grid(alpha = 0, lambda = seq(0.1,5,by = 0.1)), trControl=controls,tuneLength = 10)
+#fit.ridge
+#LASSO, 
+
+set.seed(115)
+fit.lasso <- train(training_data,training_class,method = 'glmnet',trControl=controls,tuneGrid = expand.grid(alpha = 1, lambda = seq(0.1,5,by = 0.1)))
+#fit.lasso
+
+#ElasticNet, 
+set.seed(115)
+fit.enet <- train(training_data,training_class,method = 'glmnet',trControl=controls,tuneLength = 10)
+#fit.enet
+#random forset
+set.seed(115)
+fit.rf <- train(training_data,training_class, method = 'rf',trControl=controls,tuneLength = 10)
+#fit.rf
+#support vector machines
+set.seed(115)
+fit.svm <- train(training_data,training_class,method = 'svmLinear',trControl=controls)
+#fit.svm
+```
+
+### 4. Summarize the performance of each machine learning method, in terms of accuracy and kappa. 
+
+```{r,eval=TRUE}
+#https://machinelearningmastery.com/compare-the-performance-of-machine-learning-algorithms-in-r/
+results <- resamples(list(knn=fit.knn,logistic_regression=fit.lr,ridge=fit.ridge,lasso=fit.lasso,elasticNet=fit.enet,randonforest=fit.rf,support_vector_machines=fit.svm))
+
+summary(results)
+# boxplots of results
+bwplot(results)
+# dot plots of results
+dotplot(results)
+```
+
+
+### 5. For Graduate students: Compare the performance difference between logistic regression, Ridge, LASSO, and ElasticNet. In LASSO, how many PCs have non-zero coefficient? In ElasticNet, what is the lamda for Ridge and LASSO, respectively? 
+1. In LASSO, how many PCs have non-zero coefficient? 
+2. What is best lambda for Ridge and LASSO?
+
+```{txt}
+Accuracy is the percentage of correctly classifies instances out of all instances. It is more useful on a binary classification than multi-class classification problems because it can be less clear exactly how the accuracy breaks down across those classes (e.g. you need to go deeper with a confusion matrix). 
+
+Kappa or Cohen’s Kappa is like classification accuracy, except that it is normalized at the baseline of random chance on your dataset. It is a more useful measure to use on problems that have an imbalance in the classes (e.g. 70-30 split for classes 0 and 1 and you can achieve 70% accuracy by predicting all instances are for class 0). 
+
+Logistic regression: Accruacy mean=  0.8694 ,kappa mean=  0.7387
+Ridge:Accruacy mean=  0.931  ,kappa mean : 0.862
+LASSO: Accruacy mean=  0.931, kappa mean= 0.8198
+ElasticNet: Accruacy mean=0.909 ,kappa mean= 0.98
+
+so overall ElasticNet and logistic regression seems best (looking at the box/dotplot we can draw the same conculsions)
+```
+
+```{r,eval=TRUE}
+print(paste0("In LASSO, how many PCs have non-zero coefficient: ",sum(coef(fit.lasso$finalModel, fit.lasso$finalModel$lambdaOpt)!=0)))
+```
+
+Alpha
+```{txt}
+ridge regression : alpha = 0
+LASSO: alpha=1 
+```
+
+```{r,eval=TRUE}
+fit.ridge$bestTune #3	 is the best lamba for ridge
+fit.lasso$bestTune # 0.1	 is the best lamba for lasso 
+```
+
+### 6. Use the PCA projections in Q1 to obtain the first 25 PCs of the 20 unknown samples. Use one method that performs well in Q4 to make predictions. Caret already used the hyper-parameters learned from cross-validation to train the parameters of each method on the full 100 training data. You just need to call this method to make the predictions. 
+
+```{r,eval=TRUE}
+unknownsamples_dataset<- read.table(file = "q1_data/unknown_samples.txt", sep = "\t", header = TRUE, row.names = 1)
+```
+
+```{r,eval=TRUE}
+testing_25PC<- data.frame(scale(unknownsamples_dataset,
+                                    data.pca$center, 
+                                    data.pca$scale) %*% data.pca$rotation)[,1:25]
+ 
+pred_lr <- predict(fit.lr, newdata=testing_25PC)#type for probab 
+print('the prediction made with linear regression are :')
+print(pred_lr)
+
+```
+```{r,eval=TRUE}
+pred_en_prob <- predict(fit.enet, newdata=testing_25PC,type='prob')#type for probab 
+pred_en <- predict(fit.enet, newdata=testing_25PC)
+print('the prediction made with elastic net are  are :')
+print(pred_en)
+print(pred_en_prob)
+```
+
+```{r,eval=TRUE}
+pred_en <- predict(fit.enet, newdata=testing_25PC)#type for probab 
+print('the prediction made with elastic net are  are :')
+print(pred_en)
+
+```
+
+```{r,eval=TRUE}
+#use another method- not a question i was just curious 
+pred_lasso <- predict(fit.lasso, newdata=testing_25PC)
+print('the prediction made with ElasticNet are :')
+print(pred_lasso)
+
+pred_lasso==pred_lr#the 2 models predicts the same label for all the 20 unknowns samples 
+pred_lr==pred_en
+      
+```
+
+### 7. For Graduate students: Can you find out the top 3 genes that are most important in this prediction method in Q6? Do they have some known cancer relevance? 
+
+```{r,eval=TRUE}
+genes_imp <- varImp(fit.enet)
+genes_imp #PC2 is max 
+
+
+top_3_genes_variance2<- tail(sort((data.pca)$rotation[,2]),3) #so [,2] pc2 
+top_3_genes_variance2
+# CDK5       PAK4     TRIM11  
+```
+
+```{txt}
+https://www.proteinatlas.org
+CDK5;  has been recently implicated in the development and progression of a variety of cancers including breast, lung, colon, pancreatic, melanoma, thyroid and brain tumors. 
+Cdk5 is not mutated in cancer tissues but its expression and activity are deregulated. Cdk5 contributes to tumor proliferation, migration, angiogenesis, and is linked to chemotherapy resistance and anti-tumor immunity
+
+ PAK4    :Prognostic marker in renal cancer (favourable) and prostate cancer (unfavourable)// Low cancer specificity
+  TRIM11     : TRIM11 was highly expressed in lung cancer tissues and lung cancer cell lines. Prognostic marker in liver cancer (unfavourable) and renal cancer (unfavourable)//low cancer specificity 
+  
+```
+
+### 8. Suppose a pathologist later made diagnosis on the 20 unknown samples (load the diagnosis.txt file). Based on this gold standard, draw an ROC curve of your predictions in Q6. What is the prediction AUC? 
+
+```{r,eval=TRUE}
+diagnosis <- read.table(file = "q1_data/diagnosis.txt", sep = "\t", header = TRUE, row.names = 1)
+head(diagnosis)
+diagnosis
+
+# your code here
+trans_pred<-transform(pred_en, char = as.numeric(pred_en))
+diagnosis_pred<-transform(diagnosis, char = as.numeric(phenotype))
+#control= 1, case= 2 
+
+```
+```{r}
+ROC <- roc(trans_pred$char, diagnosis_pred$char)
+plot(ROC)
+title('ROC curve for Elastic net algo predictor of the 20 unknown sample ')
+auc(ROC)
+```
+
+```{txt}
+Area under the curve: 0.899
+```
+
+
+## Part II. Single cell RNA-seq 
+
+For this exercise, we will be analyzing a single cell RNA-Seq dataset of human peripheral blood mononuclear cells (PBMC) from 10X Genomics (droplet-based) from a healthy donor (Next GEM). The raw data can be found below which is already processed by CellRanger into the expression matrix format. 
+
+https://support.10xgenomics.com/single-cell-gene-expression/datasets/3.0.2/5k_pbmc_v3_nextgem
+
+
+### 1. Load data: Read the 10X data and create a Seurat (Butler et al., Nature Biotechnology 2018) Object. Please report number of cells, number of genes, and dropout rate.
+
+```{r,eval=TRUE}
+# Load the PBMC dataset-count matrix 
+#download from website+ unzip the documents 
+pbmc.data <- Read10X(data.dir="filtered_feature_bc_matrix/")
+#head(pbmc.data)
+dim(pbmc.data)
+
+```
+```{r,eval=TRUE}
+sum(pbmc.data == 0) / (dim(pbmc.data)[1]*dim(pbmc.data)[2] ) #drop out rate
+```
+
+```{txt}
+#33538 genes 5155 cells before any filtering 
+```
+
+```{r,eval=TRUE}
+#We next use the count matrix to create a Seurat object. The object serves as a container that contains both data (like the count matrix) and analysis (like PCA, or clustering results) for a single-cell datas
+pbmc <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 3)
+dim(pbmc[["RNA"]]@counts) #19041 genes across 5155 cells
+
+pbmc #19037 features across 5100 samples 
+#https://github.com/satijalab/seurat/wiki
+```
+
+```{r,eval=TRUE}
+sum(pbmc[["RNA"]]@counts== 0) / (dim(pbmc)[1]*dim(pbmc)[2] )
+```
+
+```{txt}
+when we CreateSeuratObject we do include features detected in at least 3 cells.in our case we only keep the genes that are expressed in at least 3 cells.
+after filtering we have 19041 genes and 5155 cells with drop out rate of 86% The drop out  Before any filterting we obtain  33538 genes   5155 cells aith dropout rate is 93.4% 
+```
+
+```{txt}
+The dropout rate is defined as the proportion of zero entries in the count matrix.
+```
+
+
+
+### 2. QC genes: We want to filter genes that are detected in very few cells. Let’s keep all genes expressed in >= 10 cells. How do the above summary statistics change after filtering?
+
+```{r,eval=TRUE}
+pbmc_10 <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 10)
+dim(pbmc_10)
+sum(pbmc_10[["RNA"]]@counts== 0) / (dim(pbmc_10)[1]*dim(pbmc_10)[2] )
+```
+```{txt}
+16022 genes across 5155 cells  - so less genes - this is what we would have expected- the drop out rate is 86(which is different from the value we got with no filter but it doesnt when we change the number of minimum cell(from 3 to 10))
+```
+
+
+### 3. QC cells:Next we will filter cells with high proportion of mitochondrial reads (potential dead cells) or outlier number of genes (potential poor reactions or multiplets). What proportion of the counts from your filtered dataset map to mitochondrial genes? Remove those cells with high mitochondrial rate (> 5%). Outlier cells with extremely high or low gene coverage should be removed, and the cutoff depends on the scRNA-seq technology and the distribution of each dataset. What is the distribution of number of genes and UMIs in your dataset? Let’s filter cells with > 1 stdev of covered genes from the average.  Keep the remaining cells for downstream analysis.
+
+
+```{r,eval=TRUE}
+pbmc_10[["percent.mt"]] <- PercentageFeatureSet(object = pbmc_10, pattern = "^MT-")
+
+pbmc_test<- subset(x = pbmc_10, subset = percent.mt < 5) #645
+dim(pbmc_test) 
+# ( 5155-645)/ 5155 that is to say 87.4 % of the cells have been removed 
+
+
+l_b=mean(pbmc_10[["nFeature_RNA"]]$nFeature_RNA)-sd(pbmc_10[["nFeature_RNA"]]$nFeature_RNA) #lower bound
+l_b #1294.188
+u_b= mean(pbmc_10[["nFeature_RNA"]]$nFeature_RNA)+sd(pbmc_10[["nFeature_RNA"]]$nFeature_RNA) #upper bound 
+#3110.849
+
+#UMI stands for unique molecular identified (UMI) count matrix.
+pbmc_final<-subset(x = pbmc_10, subset = nFeature_RNA > l_b & nFeature_RNA<u_b &percent.mt < 5)
+
+dim(pbmc_final) # end up with 530 cells after filtering for outliner and high mitochondrial rate 
+```
+
+
+```{txt}
+After filtering for cells with high proportion of mitochondrial reads we end up with 16022 genes and 645 cells. 
+ ( 5155-645)/ 5155that is to say    87.4 %  of the cells have been removed 
+we end up with 530 cells after filtering for outliner and high mitochondrial rate 
+```
+
+
+### 4. Dimension reduction: Use global-scaling normalization method in Seurat with the scaling factor 10000, so all the cells will be normalized to have the same sequencing depth to 10K. Use the Seurat function "FindVariableGenes" to select 2000 genes (by default) showing expression variability, then perform PCA on these genes. Provide summary plots, statistics, and tables to show 
+- How many PCs are statistically significant?
+- The top 5 genes with the most positive and negative coefficients in each of the significant PCs,
+- How much variability is explained in each of the significant PCs.
+
+```{r,eval=TRUE}
+pbmc_norm <- NormalizeData(object = pbmc_final, normalization.method = "LogNormalize", scale.factor = 10000)
+pbmc_norm_2000<-FindVariableFeatures(object = pbmc_norm,nfeatures = 2000)
+#head(pbmc_norm_2000[[]])
+#top5 <- head(x = VariableFeatures(object = pbmc_norm_2000), 5)
+#print(top5)
+```
+
+```{r,eval=TRUE}
+genes_2000 <- rownames(x = pbmc_norm_2000)
+#head(genes_2000)
+pbmc_norm_2000_scaled<- ScaleData(object = pbmc_norm_2000, features = genes_2000)
+#head(pbmc_norm_2000_scaled[[]])
+pbmc <- RunPCA(object = pbmc_norm_2000_scaled, features = VariableFeatures(object = pbmc_norm_2000_scaled))
+```
+
+```{txt}
+- How many PCs are statistically significant?
+```
+
+```{r,eval=TRUE}
+
+#takes a bit of time - dims can be changed to higher number if we suspect more than 20 significants
+pbmc <- JackStraw(pbmc,dims = 20)
+```
+```{r,eval=TRUE}
+pbmc <- ScoreJackStraw(pbmc,dims = 1:20)
+```
+
+```{r}
+JackStrawPlot(pbmc, dims = 1:20)
+```
+
+```{txt}
+11 significants PC (after the p-values generally  higher than 0.05)
+```
+- The top 5 genes with the most positive and negative coefficients in each of the significant PCs.
+```{r,eval=TRUE}
+#gives for the 5 first features for 25 first pca  
+print(pbmc[["pca"]], dims = 1:11, nfeatures = 5)
+```
+- How much variability is explained in each of the significant PCs.
+```{r,eval=TRUE}
+ElbowPlot(pbmc, ndims = 11, reduction = "pca") #this not not the variablity its the standard deviation 
+```
+this is a list representing the variability explained by each of the significant pc 
+
+```{r,eval=TRUE}
+head((Stdev(pbmc, reduction = "pca"))/sum((Stdev(pbmc, reduction = "pca"))) *100,11)
+```
+
+
+
+
+
+#More plots 
+```{r,eval=TRUE}
+VizDimLoadings(pbmc,1:4 ,reduction = "pca") #y axis- genes x pca value for this pca 
+```
+
+```{r,eval=TRUE}
+DimPlot(pbmc, reduction = "pca")
+```
+
+```{r, fig.height=12, fig.width=9,eval=TRUE}
+DimHeatmap(object = pbmc, dims = 1:20, cells = 500, balanced = TRUE)
+```
+
+```{r,eval=TRUE}
+#heat map pca1 
+DimHeatmap(pbmc, dims = 1, balanced = TRUE)
+```
+
+
+
+### 5. For GRADUATE students: Sometimes scRNA-seq data might have significant PCs that are heavily weighted by cell cycle genes, which need to be removed before downstream analyses. Check the top PCs in this data to see whether cell cycle components need to be removed. Provide plots and other quantitative arguments to support your case. 
+
+
+```{r,eval=TRUE}
+# A list of cell cycle markers, from Tirosh et al, 2015, is loaded with Seurat.  We can
+# segregate this list into markers of G2/M phase and markers of S phase
+#cc.genes
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+
+#print(results_pca[["pca"]], dims = 1:25, nfeatures = 5)
+results_pca_cell_scoring <- CellCycleScoring(pbmc_norm_2000_scaled, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+head(results_pca_cell_scoring[[]])
+```
+```{r,eval=TRUE}
+results_pca_cell_scoring_pca <- RunPCA(results_pca_cell_scoring, features = c(s.genes, g2m.genes))
+DimPlot(results_pca_cell_scoring_pca)
+```
+```{txt}
+dont need to adjust because the cells dont cluster based on cell cycle phase - if wanted we could still adjust and see hw the results will be (but can be long )
+
+```
+
+
+
+### 6. Visualization: Use Seurat to run UMAP on the top 20 PCs (regardless of how many PCs are statistically significant) from Q4. Visualize the cells and their UMAP coordinates and comment on the number of cell clusters that appear on this data. Describe the difference between PCA and UMAP on 2D plots?
+```{r,eval=TRUE}
+library(reticulate)
+#reticulate::py_install(packages = "umap-learn")
+```
+
+
+```{r,eval=TRUE}
+pbmc <- FindNeighbors(object = pbmc, dims = 1:20)
+pbmc <- FindClusters(object = pbmc,dims=1:20)
+pbmc <- RunUMAP(pbmc, dims = 1:20) #top 20 
+DimPlot(pbmc, reduction = "umap",label=TRUE)
+```
+
+```{txt}
+They are 6 clusters - 
+  Comparing to PCA plot the cluster seem to be more distinct one form the other(although its separation is not completly obvious without color coding)- it seem like the cluster are more separted in space in UMAP comparing to PCA. 
+```
+
+
+### 7. For GRADUATE students: Use Seurat to run tSNE on the top 20 PCs (regardless of how many PCs are statistically significant) from Q4. Comments on the difference between tSNE and UMAP runtime and results.
+
+```{r,eval=TRUE}
+pbmc <- RunTSNE(object = pbmc,dims=1:20)
+DimPlot(object = pbmc, reduction = "tsne")
+#tnse_results[['tsne']]
+#head(tnse_results[[]])
+```
+
+```{txt}
+tsne is longer than UMAP - reading online i found out a lot of advantages of this new method(UMAP)-/ 
+  they are 5 cluster when we dont specify the resolution- it seems like out of the 3 methods- the Tsne is the one where the clusters get the more separated and easily distinctable
+```
+
+### 8. For GRADUATE students: Try different `resolution` in clustering and draw the resulting clustreers in different colors on UMAP. How does resolution influence the number of clusters and the number of cells assigned to each cluster?
+
+
+```{r,eval=TRUE}
+pbmc<- FindNeighbors(pbmc, dims = 1:20)
+```
+
+```{r,eval=TRUE}
+for (i in seq(from = 0.4, to = 1.2, by = 0.2))
+  { 
+    pbmc_cluster<- FindClusters(pbmc, resolution = i)
+    p<-DimPlot(RunUMAP(pbmc_cluster, dims = 1:20), reduction = "umap",plot.title = paste0('UMAS with resolution',i))
+    print(p)
+}
+```
+
+
+```{txt}
+as the resolution increases the number of cluster increases and therefore the number of cell in each cluster decreeses. 
+```
+
+
+### 9. Clustering: Use resolution = 0.6 to cluster the cells. How many clusters to you get and how many cells are assigned to each cluster? Use Seurat to calculate differential expression between clusters (one vs the rest), identify putative biomarkers for each cell subpopulation. Visualize the gene expression values of these potential markers on your UMAP plots. 
+
+```{r,eval=TRUE}
+pbmc<- FindClusters(pbmc, resolution = 0.6)
+p<-DimPlot(RunUMAP(pbmc, dims = 1:20), reduction = "umap",plot.title = paste0('UMAS with resolution 0.6'))
+print(p)
+
+pbmc_cluster[[]]%>%group_by(seurat_clusters)%>%summarize(count = n()) #THIS SUMMARISE the number of cell per cluster 
+
+```
+```{r,eval=TRUE}
+pbmc.markers <- FindAllMarkers(object = pbmc, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+```{r,eval=TRUE}
+table_marker<-pbmc.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC) #just select top 3 
+genes_marker<-(table_marker$gene)
+genes_marker
+```
+
+```{r,eval=TRUE}
+VlnPlot(object = pbmc, features = c("TRABD2A", "CCR7","AQP3", "KLRB1", "S100A9","LYZ","CCL5","NKG7","IGHM" ,"IGKC" ),slot = 'counts', log = TRUE)
+```
+
+```{r,eval=TRUE}
+FeaturePlot(object = pbmc, features = c("TRABD2A", "CCR7","AQP3", "KLRB1", "S100A9","LYZ","CCL5","NKG7","IGHM" ,"IGKC" ))
+```
+```{r,eval=TRUE}
+pbmc.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC) -> top2
+DoHeatmap(object = pbmc, features = top2$gene) + NoLegend()
+```
+
+### 10. Annotation: For GRADUATE students: Based on the expression characteristics of your cell clusters, provide putative biological annotation (e.g. MS4A1, CD79A genes are high in B-cells) for the clusters. This paper (Newman et al, Nat Methods 2015, https://www.nature.com/articles/nmeth.3337) may serve as a good resource as well as this tutorial PBMC (https://satijalab.org/seurat/pbmc3k_tutorial.html). 
+
+
+```{r,eval=TRUE}
+new.cluster.ids <- c("Memory CD4 T", "CD14+ Mono", "Naive CD4 T", "B", "CD8 T", "FCGR3A+ Mono", "NK", "DC", "Mk")
+names(x = new.cluster.ids) <- levels(x = pbmc)
+pbmc <- RenameIdents(object = pbmc, new.cluster.ids)
+DimPlot(object = pbmc, reduction = 'umap', label = TRUE, pt.size = 0.5) + NoLegend()
+```
+
+
+
